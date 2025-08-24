@@ -47,7 +47,7 @@ Put executable scripts in `~/.config/dam/{help,pre,post}/` to run:
 - `~/.config/dam/pre/default`     - global default
 
 **Hook types:**
-- `help/` - runs for `dam help` (this text!)
+- `help/` - runs for `dam -h` or `dam --help` (this text!)
 - `pre/` - runs before attach/create (always)
 - `setup/` - runs only after creating new sessions (before attach)
 - `post/` - runs after detach/exit (always)

@@ -71,7 +71,7 @@ _session_exists() {
 dam () {
     # Handle help as a hook
     case "$1" in
-        -h|--help|help) _run_hook "help" "dam" "" && return 0 ;;
+        -h|--help) _run_hook "help" "dam" ""; return 0 ;;
     esac
 
     local DamHost=${1%%"/"*} DamSess=${1##*"/"}
@@ -81,12 +81,9 @@ dam () {
     _run_hook "pre" "$DamHost" "$DamSess"
     
     # Check if session exists for setup hook decision
-    local session_exists=true
-    if [[ "$DamHost" == "$HOSTNAME" ]]; then
-        tmux has-session -t "$DamSess" &>/dev/null || session_exists=false
-    else
-        ssh -q -o BatchMode=yes "$DamHost" "tmux has-session -t '$DamSess'" &>/dev/null || session_exists=false
-    fi
+    local session_exists=false
+    [[ "$DamHost" == "$HOSTNAME" ]] && tmux has-session -t "$DamSess" &>/dev/null && session_exists=true
+    [[ "$DamHost" != "$HOSTNAME" ]] && ssh -q -o BatchMode=yes "$DamHost" "tmux has-session -t '$DamSess'" &>/dev/null && session_exists=true
     
     case "$1" in
         */*)
@@ -95,9 +92,9 @@ dam () {
             if [[ "$session_exists" == "true" ]]; then
                 ssh -Aq $DamHost -t "tmux attach -dt $DamSess"
             else
-                ssh -Aq $DamHost -t "tmux new -s $DamSess -d"  # Create detached
-                _run_hook "setup" "$DamHost" "$DamSess"         # Configure it
-                ssh -Aq $DamHost -t "tmux attach -t $DamSess"   # Then attach
+                ssh -Aq $DamHost -t "tmux new -s $DamSess -d"
+                _run_hook "setup" "$DamHost" "$DamSess"
+                ssh -Aq $DamHost -t "tmux attach -t $DamSess"
             fi
             [ "$TMUX" ] && tmux set-window-option automatic-rename "on" &>/dev/null
             ;;
@@ -105,9 +102,9 @@ dam () {
             if [[ "$session_exists" == "true" ]]; then
                 tmux attach -dt $DamSess
             else
-                tmux new -s $DamSess -d           # Create detached
-                _run_hook "setup" "$DamHost" "$DamSess"  # Configure it
-                tmux attach -t $DamSess          # Then attach
+                tmux new -s $DamSess -d
+                _run_hook "setup" "$DamHost" "$DamSess"
+                tmux attach -t $DamSess
             fi
     esac
     
