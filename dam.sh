@@ -1,4 +1,4 @@
-# Display Attach Manager for tmux (remote) sessions
+# Display Attach Manager for tmux (remote) sessions with hooks
 _dam_sessions ()
 {
     COMPREPLY=();
@@ -49,20 +49,67 @@ _dam_sessions ()
 }
 complete -o nospace -F _dam_sessions dam
 
+# Hook system - executable scripts in ~/.config/dam/{help,pre,setup,post}/{host/session,host,default}
+DAM_HOOKS="${DAM_HOOKS:-$HOME/.config/dam}"
+
+_run_hook() {
+    local when="$1" host="$2" session="$3"
+    for hook in "$DAM_HOOKS/$when/$host/$session" "$DAM_HOOKS/$when/$host" "$DAM_HOOKS/$when/default"; do
+        [[ -x "$hook" ]] && { "$hook" "$host" "$session" &>/dev/null || true; break; }
+    done
+}
+
+_session_exists() {
+    local host="$1" session="$2"
+    if [[ "$host" == "$HOSTNAME" ]]; then
+        tmux has-session -t "$session" &>/dev/null
+    else
+        ssh -q -o BatchMode=yes "$host" "tmux has-session -t '$session'" &>/dev/null
+    fi
+}
+
 dam () {
-    DamHost=${1%%"/"*}                    #take first word split on slash
-    DamHost=${DamHost:-$HOSTNAME};    #use default if no host before slash
-    DamSess=${1##*"/"}                    #take last word split on slash
-    DamSess=${DamSess:-"mine"};       #use default if no session after slash
+    # Handle help as a hook
+    case "$1" in
+        -h|--help|help) _run_hook "help" "dam" "" && return 0 ;;
+    esac
+
+    local DamHost=${1%%"/"*} DamSess=${1##*"/"}
+    DamHost=${DamHost:-$HOSTNAME}
+    DamSess=${DamSess:-"mine"}
+    
+    _run_hook "pre" "$DamHost" "$DamSess"
+    
+    # Check if session exists for setup hook decision
+    local session_exists=true
+    if [[ "$DamHost" == "$HOSTNAME" ]]; then
+        tmux has-session -t "$DamSess" &>/dev/null || session_exists=false
+    else
+        ssh -q -o BatchMode=yes "$DamHost" "tmux has-session -t '$DamSess'" &>/dev/null || session_exists=false
+    fi
+    
     case "$1" in
         */*)
             [ "$TMUX" ] && tmux rename-window "$1"
-            command ssh $DamHost -O check 2> /dev/null && ( timeout 3 ssh $DamHost exit || ssh $DamHost -O exit );
-            command ssh -Aq $DamHost -t "tmux attach -dt $DamSess || tmux new -s $DamSess" 
-            [ "$TMUX" ] && tmux set-window-option automatic-rename "on" 1>/dev/null
+            ssh $DamHost -O check &>/dev/null && (timeout 3 ssh $DamHost exit || ssh $DamHost -O exit)
+            if [[ "$session_exists" == "true" ]]; then
+                ssh -Aq $DamHost -t "tmux attach -dt $DamSess"
+            else
+                ssh -Aq $DamHost -t "tmux new -s $DamSess -d"  # Create detached
+                _run_hook "setup" "$DamHost" "$DamSess"         # Configure it
+                ssh -Aq $DamHost -t "tmux attach -t $DamSess"   # Then attach
+            fi
+            [ "$TMUX" ] && tmux set-window-option automatic-rename "on" &>/dev/null
             ;;
         *)
-            tmux attach -dt $DamSess || tmux new -s $DamSess
+            if [[ "$session_exists" == "true" ]]; then
+                tmux attach -dt $DamSess
+            else
+                tmux new -s $DamSess -d           # Create detached
+                _run_hook "setup" "$DamHost" "$DamSess"  # Configure it
+                tmux attach -t $DamSess          # Then attach
+            fi
     esac
-
+    
+    _run_hook "post" "$DamHost" "$DamSess"
 }
