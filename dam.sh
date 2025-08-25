@@ -55,7 +55,7 @@ DAM_HOOKS="${DAM_HOOKS:-$HOME/.config/dam}"
 _run_hook() {
     local when="$1" host="$2" session="$3"
     for hook in "$DAM_HOOKS/$when/$host/$session" "$DAM_HOOKS/$when/$host" "$DAM_HOOKS/$when/default"; do
-        [[ -x "$hook" ]] && { "$hook" "$host" "$session" &>/dev/null || true; break; }
+        [[ -x "$hook" ]] && { "$hook" "$host" "$session" || true; break; }
     done
 }
 
@@ -69,9 +69,10 @@ _session_exists() {
 }
 
 dam () {
-    # Handle help as a hook
-    case "$1" in
-        -h|--help) _run_hook "help" "dam" ""; return 0 ;;
+    declare -F _dam_setup &>/dev/null && _dam_setup # Setup(on source) help file and hook directories
+    
+    case "$1" in # Handle help as a hook
+        -h|--help) _run_hook "help" "$2" ""; return 0 ;;
     esac
 
     local DamHost=${1%%"/"*} DamSess=${1##*"/"}
@@ -109,4 +110,62 @@ dam () {
     esac
     
     _run_hook "post" "$DamHost" "$DamSess"
+}
+
+#Initial interactive hook directory structure and default help setup
+_dam_setup() {
+    unset -f _dam_setup; 
+    [ -d ~/.config/dam/help ] && return 0; #already setup, skip init
+    echo -n "DAM: First source - setup help and hook directories? (y/n): "
+    read -r dam_setup_response;
+    case "${dam_setup_response}" in
+        [Yy]*) ;;
+        *) echo "DAM: Setup skipped."; return 0;
+    esac
+    mkdir -p ~/.config/dam/{help,pre,setup,post} || return 1;
+
+    #create default help hook with embedded help text
+    cat > ~/.config/dam/help/default << 'DAM_HELP_EOF'
+#!/bin/bash
+cat << 'EOF'
+# DAM - Display Attach Manager
+Attach to tmux sessions locally or remotely, with optional hooks for automation.
+
+## BASIC USE
+dam                     # attach to 'mine' session locally
+dam work                # attach to 'work' session locally
+dam host/               # attach to 'mine' session on 'host'
+dam host/deploy         # attach to 'deploy' session on 'host'
+
+Use <tab> completion to see available sessions and hosts.
+
+## HOOKS (optional automation)
+Put executable scripts in `~/.config/dam/{help,pre,setup,post}/` to run:
+
+**Hook locations (first found wins):**
+- `~/.config/dam/pre/myhost/work` - specific to myhost/work session
+- `~/.config/dam/pre/myhost`      - default for myhost
+- `~/.config/dam/pre/default`     - global default
+
+**Hook types:**
+- `help/` - runs for `dam -h` or `dam --help` (this text!)
+- `pre/` - runs before attach/create (always)
+- `setup/` - runs only after creating new sessions (before attach)
+- `post/` - runs after detach/exit (always)
+
+**Hook arguments:** `$1=host $2=session`
+
+**Example:** Create `~/.config/dam/pre/default` to set terminal title:
+```bash
+#!/bin/bash
+printf '\033]0;DAM: %s/%s\007' "$1" "$2"
+```
+
+That's it. Happy tmuxing!
+EOF
+DAM_HELP_EOF
+
+    chmod +x ~/.config/dam/help/default;           #make help hook executable
+    echo "DAM: Setup complete. Try 'dam -h[elp]' to see usage." >&2;
+
 }
